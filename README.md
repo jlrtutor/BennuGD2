@@ -26,6 +26,13 @@ This generates `bgdc`, `bgdi`, and runtime modules in:
 
 `build/macos-arm64/bin`
 
+## Prebuilt Apple Silicon Binaries in Repository
+
+This repository also includes prebuilt macOS arm64 binaries in:
+
+- `binaries/macos-arm64/bin`
+- `binaries/macos-arm64/Frameworks/SDL2_gpu.framework`
+
 ## Compile a Game
 
 From the repository root:
