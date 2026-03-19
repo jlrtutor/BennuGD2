@@ -36,6 +36,10 @@ export LD_LIBRARY_PATH=$BGD2DEV/build/linux-gnu/bin:$LD_LIBRARY_PATH
 # export PATH=$BGD2DEV/build/x86_64-apple-darwin14/bin:$PATH
 # export DYLD_LIBRARY_PATH=$BGD2DEV/build/x86_64-apple-darwin14/bin:$DYLD_LIBRARY_PATH
 
+# macos-arm64 (macOS Apple Silicon)
+# export PATH=$BGD2DEV/build/macos-arm64/bin:$PATH
+# export DYLD_LIBRARY_PATH=$BGD2DEV/build/macos-arm64/bin:$DYLD_LIBRARY_PATH
+
 # x86_64-w64-mingw32
 # export PATH=$BGD2DEV/build/x86_64-w64-mingw32/bin:$PATH
 ```
@@ -86,6 +90,28 @@ Replace `<path_to_your_BennuGD2_installation_directory>` with the actual path wh
 
    cd ..
    ./build.sh linux clean
+   ```
+
+### macOS (Apple Silicon: M1/M2/M3)
+
+1. **Install build dependencies with Homebrew**
+
+   ```bash
+   brew install cmake sdl2 sdl2_image sdl2_mixer glew libogg libvorbis theora pkg-config
+   ```
+
+2. **Clone and build BennuGD2**
+
+   ```bash
+   git clone https://github.com/SplinterGU/BennuGD2.git
+   cd BennuGD2/
+   git submodule update --init --recursive
+
+   cd vendor
+   ./build-sdl-gpu.sh macos-arm64 clean
+
+   cd ..
+   ./build.sh macos-arm64 clean use_sdl2_gpu
    ```
 
 ### Windows 64

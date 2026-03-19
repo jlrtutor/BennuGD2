@@ -24,7 +24,7 @@ if(MINGW)
 endif()
 
 if(APPLE)
-    set(OGL_LIB -L$ENV{SDKROOT}/System/Library/Frameworks/OpenGL.framework/Libraries/ -lGL)
+    set(OGL_LIB "-framework OpenGL")
 endif()
 
 add_library(bggfx ${LIBRARY_BUILD_TYPE} ${SOURCES_LIBBGGFX})

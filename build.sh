@@ -2,22 +2,35 @@
 
 show_help() {
     echo "usage:"
-    echo "    $0 [windows|windows32|linux|linux32|switch|macosx] [debug] [clean] [packages] [use_sdl2|use_sdl2_gpu] [verbose] [static] [one-job]"
+    echo "    $0 [windows|windows32|linux|linux32|switch|macos-arm64|macos|darwin|macosx] [debug] [clean] [packages] [use_sdl2|use_sdl2_gpu] [verbose] [static] [one-job]"
     exit 1
 }
+
+detect_homebrew_prefix() {
+    if command -v brew >/dev/null 2>&1; then
+        brew --prefix 2>/dev/null
+    fi
+}
+
+OTOOL_BIN=${OTOOL_BIN:-otool}
+INSTALL_NAME_TOOL_BIN=${INSTALL_NAME_TOOL_BIN:-install_name_tool}
 
 fix_install_name() {
     directory=$1
     find "$directory" -type f -print0 | while IFS= read -r -d '' file; do
         if [[ $(file "$file") == *"Mach-O"* ]]; then
-            paths=$(x86_64-apple-darwin14-otool -l "$file" | grep -E '(/opt/local/lib|@rpath)' | awk '{print $2}')
+            paths=$($OTOOL_BIN -l "$file" | grep -E '(/opt/local/lib|/opt/homebrew/lib|/usr/local/lib|@rpath)' | awk '{print $2}')
             while IFS= read -r path; do
                 if [[ "$path" == *"@rpath/SDL2_gpu.framework/Versions/A/SDL2_gpu"* ]]; then
-                    x86_64-apple-darwin14-install_name_tool -change "$path" "@executable_path/../Frameworks/SDL2_gpu" "$file"
+                    $INSTALL_NAME_TOOL_BIN -change "$path" "@executable_path/../Frameworks/SDL2_gpu" "$file"
                 elif [[ "$path" == *"/opt/local/lib"* ]]; then
-                    x86_64-apple-darwin14-install_name_tool -change "$path" "@executable_path/../Libraries$(echo "$path" | sed 's,/opt/local/lib,,')" "$file"
+                    $INSTALL_NAME_TOOL_BIN -change "$path" "@executable_path/../Libraries$(echo "$path" | sed 's,/opt/local/lib,,')" "$file"
+                elif [[ "$path" == *"/opt/homebrew/lib"* ]]; then
+                    $INSTALL_NAME_TOOL_BIN -change "$path" "@executable_path/../Libraries$(echo "$path" | sed 's,/opt/homebrew/lib,,')" "$file"
+                elif [[ "$path" == *"/usr/local/lib"* ]]; then
+                    $INSTALL_NAME_TOOL_BIN -change "$path" "@executable_path/../Libraries$(echo "$path" | sed 's,/usr/local/lib,,')" "$file"
                 elif [[ "$path" == *@rpath* ]]; then
-                    x86_64-apple-darwin14-install_name_tool -change "$path" "@executable_path/$(basename "$path")" "$file"
+                    $INSTALL_NAME_TOOL_BIN -change "$path" "@executable_path/$(basename "$path")" "$file"
                 fi
             done <<< "$paths"
         fi
@@ -27,12 +40,16 @@ fix_install_name() {
 # Function to copy dependencies recursively
 copy_dependencies() {
     # Get the dependencies of the target file using otool -L
-    for dylib in $(x86_64-apple-darwin14-otool -L $* | grep -v : | sort -u | awk '{print $1}')
+    for dylib in $($OTOOL_BIN -L $* | grep -v : | sort -u | awk '{print $1}')
     do
-        # Only process if the dependency starts with /opt/local/lib/
-        if [[ "$dylib" == /opt/local/lib/* ]]; then
-            # Search for the file in the macports pkg directory
-            found_dylib=$(find $SDKROOT/../../macports/pkgs/ -name $(basename "$dylib") 2>/dev/null | head -n 1)
+        # Only process if the dependency is an external dynamic library
+        if [[ "$dylib" == /opt/local/lib/* || "$dylib" == /opt/homebrew/lib/* || "$dylib" == /usr/local/lib/* ]]; then
+            if [[ "$dylib" == /opt/local/lib/* ]]; then
+                # Search for the file in the macports pkg directory
+                found_dylib=$(find $SDKROOT/../../macports/pkgs/ -name $(basename "$dylib") 2>/dev/null | head -n 1)
+            else
+                found_dylib="$dylib"
+            fi
 
             # If the file is found, copy it and process its dependencies recursively
             if [ -n "$found_dylib" ]; then
@@ -54,15 +71,21 @@ copy_dependencies() {
 
 build_app() {
     app=$1
+    build_target=${MACOS_BUILD_TARGET:-x86_64-apple-darwin14}
+    framework_path="dependencies/$build_target/SDL2_gpu.framework/Versions/Current/SDL2_gpu"
+
     mkdir -p packages/$app.app/Contents/Frameworks
     mkdir -p packages/$app.app/Contents/Libraries
     mkdir -p packages/$app.app/Contents/MacOS
 
-    cp -f dependencies/x86_64-apple-darwin14/SDL2_gpu.framework/Versions/Current/SDL2_gpu packages/$app.app/Contents/Frameworks
-    cp -f build/x86_64-apple-darwin14/bin/*.dylib build/x86_64-apple-darwin14/bin/$app packages/$app.app/Contents/MacOS
+    if [[ ! -f "$framework_path" ]]; then
+        framework_path=$(find "dependencies/$build_target/SDL2_gpu.framework" -name SDL2_gpu -type f 2>/dev/null | head -n 1)
+    fi
+    cp -f "$framework_path" packages/$app.app/Contents/Frameworks
+    cp -f build/$build_target/bin/*.dylib build/$build_target/bin/$app packages/$app.app/Contents/MacOS
 
     # Recursively copy dependencies for the main ELF executable
-    copy_dependencies "build/x86_64-apple-darwin14/bin/$app" "build/x86_64-apple-darwin14/bin/*.dylib"
+    copy_dependencies "build/$build_target/bin/$app" "build/$build_target/bin/*.dylib"
 
     echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -96,7 +119,7 @@ build_app() {
     fix_install_name "$app.app/Contents/Libraries"
     fix_install_name "$app.app/Contents/MacOS"
 
-    tar -zcvf x86_64-apple-darwin14-$app-$(date +"%Y-%m-%d").app.tgz $app.app/*
+    tar -zcvf ${build_target}-$app-$(date +"%Y-%m-%d").app.tgz $app.app/*
 
     rm -Rf $app.app
 
@@ -235,6 +258,29 @@ do
             CMAKE_EXTRA+=" -DCMAKE_C_FLAGS=-Wno-pointer-sign"
             EXTRA_CFLAGS+="-I${SDKROOT}/../../macports/pkgs/opt/local/include"
             STDLIBSFLAGS="-L${SDKROOT}/../../macports/pkgs/opt/local/lib"
+            MACOS_BUILD_TARGET=$TARGET
+            OTOOL_BIN=x86_64-apple-darwin14-otool
+            INSTALL_NAME_TOOL_BIN=x86_64-apple-darwin14-install_name_tool
+            ;;
+
+        macos-arm64|macos|darwin)
+            TARGET=macos-arm64
+            HOMEBREW_PREFIX=$(detect_homebrew_prefix)
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                if [ -d /opt/homebrew ]; then
+                    HOMEBREW_PREFIX=/opt/homebrew
+                elif [ -d /usr/local ]; then
+                    HOMEBREW_PREFIX=/usr/local
+                fi
+            fi
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                echo "Error: Homebrew prefix not found. Install Homebrew first."
+                exit 1
+            fi
+            CMAKE_EXTRA="-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_C_FLAGS=-Wno-pointer-sign -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_IMAGE_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_IMAGE_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_image.dylib -DSDL2_Mixer_INCLUDE_DIRS=${HOMEBREW_PREFIX}/include/SDL2 -DSDLMIXER_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_mixer.dylib"
+            INCLUDE_DIRECTORIES="${HOMEBREW_PREFIX}/include"
+            STDLIBSFLAGS="-L${HOMEBREW_PREFIX}/lib"
+            MACOS_BUILD_TARGET=$TARGET
             ;;
 
         static)
@@ -277,6 +323,9 @@ do
                 build_app bgdi
                 build_app moddesc
             fi
+            if [[ -d build/macos-arm64/bin ]]; then
+                tar -zcvf packages/bgd2-macos-arm64-$(date +"%Y-%m-%d").tgz build/macos-arm64/bin/* dependencies/macos-arm64/* WhatsNew.txt --transform='s,[^/]*/,,g';
+            fi
             exit 0
             ;;
 
@@ -306,6 +355,26 @@ then
 
         linux)
             TARGET=linux-gnu
+            ;;
+
+        darwin)
+            TARGET=macos-arm64
+            HOMEBREW_PREFIX=$(detect_homebrew_prefix)
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                if [ -d /opt/homebrew ]; then
+                    HOMEBREW_PREFIX=/opt/homebrew
+                elif [ -d /usr/local ]; then
+                    HOMEBREW_PREFIX=/usr/local
+                fi
+            fi
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                echo "Error: Homebrew prefix not found. Install Homebrew first."
+                exit 1
+            fi
+            CMAKE_EXTRA="-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_C_FLAGS=-Wno-pointer-sign -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_IMAGE_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_IMAGE_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_image.dylib -DSDL2_Mixer_INCLUDE_DIRS=${HOMEBREW_PREFIX}/include/SDL2 -DSDLMIXER_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_mixer.dylib"
+            INCLUDE_DIRECTORIES="${HOMEBREW_PREFIX}/include"
+            STDLIBSFLAGS="-L${HOMEBREW_PREFIX}/lib"
+            MACOS_BUILD_TARGET=$TARGET
             ;;
     esac
 

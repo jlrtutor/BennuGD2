@@ -2,8 +2,14 @@
 
 show_help() {
     echo "usage:"
-    echo "    $0 [windows|windows32|linux|linux32|switch] [debug] [clean] [verbose] [one-job]"
+    echo "    $0 [windows|windows32|linux|linux32|switch|macos-arm64|macos|darwin|macosx] [debug] [clean] [verbose] [one-job]"
     exit 1
+}
+
+detect_homebrew_prefix() {
+    if command -v brew >/dev/null 2>&1; then
+        brew --prefix 2>/dev/null
+    fi
 }
 
 BUILD_TYPE=Release
@@ -52,6 +58,23 @@ do
         macosx)
             TARGET=x86_64-apple-darwin14
             CMAKE_EXTRA="-DCMAKE_C_FLAGS=-Wno-incompatible-function-pointer-types -DCMAKE_OSX_DEPLOYMENT_TARGET=10.10 -DSDL2_INCLUDE_DIR=${SDKROOT}/../../macports/pkgs/opt/local/include/SDL2 -DSDL2_LIBRARY=${SDKROOT}/../../macports/pkgs/opt/local/lib/libSDL2.dylib -DSDL2_LIBRARIES=${SDKROOT}/../../macports/pkgs/opt/local/lib/libSDL2.dylib -DCMAKE_C_COMPILER=${SDKROOT}/../../bin/o64-clang -DCMAKE_CXX_COMPILER=${SDKROOT}/../../bin/o64-clang++  -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_SYSROOT=${SDKROOT}/../../SDK/MacOSX10.10.sdk"
+            ;;
+
+        macos-arm64|macos|darwin)
+            TARGET=macos-arm64
+            HOMEBREW_PREFIX=$(detect_homebrew_prefix)
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                if [ -d /opt/homebrew ]; then
+                    HOMEBREW_PREFIX=/opt/homebrew
+                elif [ -d /usr/local ]; then
+                    HOMEBREW_PREFIX=/usr/local
+                fi
+            fi
+            if [ "$HOMEBREW_PREFIX" = "" ]; then
+                echo "Error: Homebrew prefix not found. Install Homebrew first."
+                exit 1
+            fi
+            CMAKE_EXTRA="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib"
             ;;
 
         debug)
@@ -132,6 +155,11 @@ if [ $? -eq 0 ]; then
             cp -Rf SDL_gpu/lib/* ../../../../dependencies/$TARGET
             ;;
 
+        macos-arm64)
+            mkdir -p ../../../../dependencies/$TARGET
+            cp -Rf SDL_gpu/lib/* ../../../../dependencies/$TARGET
+            ;;
+
     esac
     
 fi
@@ -140,4 +168,3 @@ cd -
 echo "### Build done! ###"
 
 exit 0
-
