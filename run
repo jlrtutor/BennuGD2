@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./run <path/to/game.prg|path/to/game.dcb> [bgdi_options...]
+
+Examples:
+  ./run games/Goody/Goody.prg
+  ./run games/Goody/Goody.dcb
+  ./run games/Goody/Goody.dcb -d
+EOF
+}
+
+resolve_abs_path() {
+    local input="$1"
+    if [[ -f "$input" ]]; then
+        echo "$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    if [[ -f "$SCRIPT_DIR/$input" ]]; then
+        echo "$(cd "$(dirname "$SCRIPT_DIR/$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    return 1
+}
+
+find_bgdi() {
+    local candidate
+    if [[ -n "${BGDI:-}" && -x "${BGDI:-}" ]]; then
+        echo "$BGDI"
+        return 0
+    fi
+    for candidate in \
+        "$SCRIPT_DIR/build/macos-arm64/bin/bgdi" \
+        "$SCRIPT_DIR/build/linux-gnu/bin/bgdi" \
+        "$SCRIPT_DIR/build/x86_64-w64-mingw32/bin/bgdi.exe" \
+        "$SCRIPT_DIR/build/i686-w64-mingw32/bin/bgdi.exe"
+    do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v bgdi >/dev/null 2>&1; then
+        command -v bgdi
+        return 0
+    fi
+    return 1
+}
+
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INPUT="$1"
+shift || true
+
+if ! INPUT_PATH="$(resolve_abs_path "$INPUT")"; then
+    echo "Error: file not found: $INPUT" >&2
+    exit 1
+fi
+
+BGD2DEV="$SCRIPT_DIR"
+export BGD2DEV
+
+if [[ "$INPUT_PATH" == *.prg ]]; then
+    "$SCRIPT_DIR/compile" "$INPUT_PATH"
+    TARGET_DCB="${INPUT_PATH%.prg}.dcb"
+elif [[ "$INPUT_PATH" == *.dcb ]]; then
+    TARGET_DCB="$INPUT_PATH"
+else
+    echo "Error: input must be a .prg or .dcb file" >&2
+    exit 1
+fi
+
+if [[ ! -f "$TARGET_DCB" ]]; then
+    echo "Error: compiled DCB not found: $TARGET_DCB" >&2
+    exit 1
+fi
+
+if ! BGDI_BIN="$(find_bgdi)"; then
+    echo "Error: bgdi interpreter not found." >&2
+    exit 1
+fi
+
+BGDI_DIR="$(cd "$(dirname "$BGDI_BIN")" && pwd)"
+export PATH="$BGDI_DIR:$PATH"
+
+case "$(uname -s)" in
+    Darwin)
+        export DYLD_LIBRARY_PATH="$BGDI_DIR:${DYLD_LIBRARY_PATH:-}"
+        ;;
+    Linux)
+        export LD_LIBRARY_PATH="$BGDI_DIR:${LD_LIBRARY_PATH:-}"
+        ;;
+esac
+
+TARGET_DIR="$(cd "$(dirname "$TARGET_DCB")" && pwd)"
+TARGET_FILE="$(basename "$TARGET_DCB")"
+
+echo "Running: $TARGET_DCB"
+echo "Using bgdi: $BGDI_BIN"
+
+(
+    cd "$TARGET_DIR"
+    "$BGDI_BIN" "$@" "$TARGET_FILE"
+)

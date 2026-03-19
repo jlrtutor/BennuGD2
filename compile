@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./compile <path/to/game.prg> [bgdc_options...]
+
+Examples:
+  ./compile games/Goody/Goody.prg
+  ./compile games/Goody/Goody.prg -d
+  ./compile games/Goody/Goody.prg -o Goody-debug.dcb
+EOF
+}
+
+resolve_abs_path() {
+    local input="$1"
+    if [[ -f "$input" ]]; then
+        echo "$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    if [[ -f "$SCRIPT_DIR/$input" ]]; then
+        echo "$(cd "$(dirname "$SCRIPT_DIR/$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    return 1
+}
+
+find_bgdc() {
+    local candidate
+    if [[ -n "${BGDC:-}" && -x "${BGDC:-}" ]]; then
+        echo "$BGDC"
+        return 0
+    fi
+    for candidate in \
+        "$SCRIPT_DIR/build/macos-arm64/bin/bgdc" \
+        "$SCRIPT_DIR/build/linux-gnu/bin/bgdc" \
+        "$SCRIPT_DIR/build/x86_64-w64-mingw32/bin/bgdc.exe" \
+        "$SCRIPT_DIR/build/i686-w64-mingw32/bin/bgdc.exe"
+    do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v bgdc >/dev/null 2>&1; then
+        command -v bgdc
+        return 0
+    fi
+    return 1
+}
+
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PRG_INPUT="$1"
+shift || true
+
+if [[ "$PRG_INPUT" != *.prg ]]; then
+    echo "Error: expected a .prg file, got: $PRG_INPUT" >&2
+    exit 1
+fi
+
+if ! PRG_PATH="$(resolve_abs_path "$PRG_INPUT")"; then
+    echo "Error: .prg file not found: $PRG_INPUT" >&2
+    exit 1
+fi
+
+if ! BGDC_BIN="$(find_bgdc)"; then
+    echo "Error: bgdc compiler not found." >&2
+    echo "Build BennuGD2 first (example: ./build.sh macos-arm64 clean use_sdl2_gpu)." >&2
+    exit 1
+fi
+
+BGD2DEV="$SCRIPT_DIR"
+BGDC_DIR="$(cd "$(dirname "$BGDC_BIN")" && pwd)"
+export BGD2DEV
+export PATH="$BGDC_DIR:$PATH"
+
+case "$(uname -s)" in
+    Darwin)
+        export DYLD_LIBRARY_PATH="$BGDC_DIR:${DYLD_LIBRARY_PATH:-}"
+        ;;
+    Linux)
+        export LD_LIBRARY_PATH="$BGDC_DIR:${LD_LIBRARY_PATH:-}"
+        ;;
+esac
+
+PRG_DIR="$(cd "$(dirname "$PRG_PATH")" && pwd)"
+PRG_FILE="$(basename "$PRG_PATH")"
+DEFAULT_DCB="$PRG_DIR/${PRG_FILE%.prg}.dcb"
+
+echo "Compiling: $PRG_PATH"
+echo "Using bgdc: $BGDC_BIN"
+
+(
+    cd "$PRG_DIR"
+    "$BGDC_BIN" "$@" "$PRG_FILE"
+)
+
+if [[ -f "$DEFAULT_DCB" ]]; then
+    echo "OK: $DEFAULT_DCB"
+else
+    echo "Compilation finished. Output may be custom (check -o option)." >&2
+fi

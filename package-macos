@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./package-macos <path/to/game.prg|path/to/game.dcb> [--app-name Name] [--no-dmg]
+
+Examples:
+  ./package-macos games/Goody/Goody.prg
+  ./package-macos games/Goody/Goody.dcb --app-name GoodyClassic
+  ./package-macos games/Goody/Goody.prg --no-dmg
+EOF
+}
+
+resolve_abs_path() {
+    local input="$1"
+    if [[ -f "$input" ]]; then
+        echo "$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    if [[ -f "$SCRIPT_DIR/$input" ]]; then
+        echo "$(cd "$(dirname "$SCRIPT_DIR/$input")" && pwd)/$(basename "$input")"
+        return 0
+    fi
+    return 1
+}
+
+find_bgdi() {
+    local candidate
+    if [[ -n "${BGDI:-}" && -x "${BGDI:-}" ]]; then
+        echo "$BGDI"
+        return 0
+    fi
+    for candidate in \
+        "$SCRIPT_DIR/build/macos-arm64/bin/bgdi" \
+        "$SCRIPT_DIR/build/linux-gnu/bin/bgdi"
+    do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    if command -v bgdi >/dev/null 2>&1; then
+        command -v bgdi
+        return 0
+    fi
+    return 1
+}
+
+is_macho_file() {
+    file "$1" 2>/dev/null | grep -q "Mach-O"
+}
+
+copy_external_deps_recursive() {
+    local app_root="$1"
+    local macos_dir="$2"
+    local framework_bin="$3"
+    local queue_file
+    local seen_file
+    local target
+    local dep
+    local dep_base
+    local dep_dest
+
+    queue_file="$(mktemp)"
+    seen_file="$(mktemp)"
+
+    find "$macos_dir" -type f | while IFS= read -r target; do
+        if is_macho_file "$target"; then
+            echo "$target" >> "$queue_file"
+        fi
+    done
+    if [[ -f "$framework_bin" ]] && is_macho_file "$framework_bin"; then
+        echo "$framework_bin" >> "$queue_file"
+    fi
+
+    while IFS= read -r target; do
+        [[ -z "$target" ]] && continue
+        if grep -Fxq "$target" "$seen_file"; then
+            continue
+        fi
+        echo "$target" >> "$seen_file"
+
+        otool -L "$target" | awk 'NR>1 {print $1}' | while IFS= read -r dep; do
+            case "$dep" in
+                /opt/homebrew/*|/usr/local/*)
+                    dep_base="$(basename "$dep")"
+                    dep_dest="$macos_dir/$dep_base"
+                    if [[ ! -f "$dep_dest" ]]; then
+                        cp -L "$dep" "$dep_dest"
+                        if is_macho_file "$dep_dest"; then
+                            echo "$dep_dest" >> "$queue_file"
+                        fi
+                    fi
+                    ;;
+            esac
+        done
+    done < "$queue_file"
+
+    rm -f "$queue_file" "$seen_file"
+}
+
+rewrite_install_names() {
+    local macos_dir="$1"
+    local framework_bin="$2"
+    local target
+    local dep
+    local new_dep
+
+    find "$macos_dir" -type f | while IFS= read -r target; do
+        if ! is_macho_file "$target"; then
+            continue
+        fi
+        otool -L "$target" | awk 'NR>1 {print $1}' | while IFS= read -r dep; do
+            new_dep=""
+            case "$dep" in
+                @rpath/SDL2_gpu.framework/Versions/A/SDL2_gpu)
+                    new_dep="@executable_path/../Frameworks/SDL2_gpu.framework/Versions/A/SDL2_gpu"
+                    ;;
+                @rpath/*.dylib)
+                    new_dep="@executable_path/$(basename "$dep")"
+                    ;;
+                /opt/homebrew/*|/usr/local/*)
+                    new_dep="@executable_path/$(basename "$dep")"
+                    ;;
+            esac
+            if [[ -n "$new_dep" ]]; then
+                install_name_tool -change "$dep" "$new_dep" "$target" >/dev/null 2>&1 || true
+            fi
+        done
+    done
+
+    if [[ -f "$framework_bin" ]] && is_macho_file "$framework_bin"; then
+        otool -L "$framework_bin" | awk 'NR>1 {print $1}' | while IFS= read -r dep; do
+            new_dep=""
+            case "$dep" in
+                @rpath/*.dylib)
+                    new_dep="@executable_path/$(basename "$dep")"
+                    ;;
+                /opt/homebrew/*|/usr/local/*)
+                    new_dep="@executable_path/$(basename "$dep")"
+                    ;;
+            esac
+            if [[ -n "$new_dep" ]]; then
+                install_name_tool -change "$dep" "$new_dep" "$framework_bin" >/dev/null 2>&1 || true
+            fi
+        done
+    fi
+}
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "Error: package-macos must run on macOS." >&2
+    exit 1
+fi
+
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INPUT="$1"
+shift || true
+
+GENERATE_DMG=1
+APP_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --app-name)
+            APP_NAME="${2:-}"
+            shift 2
+            ;;
+        --no-dmg)
+            GENERATE_DMG=0
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if ! INPUT_PATH="$(resolve_abs_path "$INPUT")"; then
+    echo "Error: file not found: $INPUT" >&2
+    exit 1
+fi
+
+if [[ "$INPUT_PATH" == *.prg ]]; then
+    "$SCRIPT_DIR/compile" "$INPUT_PATH"
+    DCB_PATH="${INPUT_PATH%.prg}.dcb"
+elif [[ "$INPUT_PATH" == *.dcb ]]; then
+    DCB_PATH="$INPUT_PATH"
+else
+    echo "Error: input must be a .prg or .dcb file" >&2
+    exit 1
+fi
+
+if [[ ! -f "$DCB_PATH" ]]; then
+    echo "Error: DCB not found after compile: $DCB_PATH" >&2
+    exit 1
+fi
+
+if ! BGDI_BIN="$(find_bgdi)"; then
+    echo "Error: bgdi not found. Build BennuGD2 first." >&2
+    exit 1
+fi
+
+if [[ -z "$APP_NAME" ]]; then
+    APP_NAME="$(basename "${DCB_PATH%.dcb}")"
+fi
+
+GAME_DIR="$(cd "$(dirname "$DCB_PATH")" && pwd)"
+DCB_FILE="$(basename "$DCB_PATH")"
+BUILD_BIN_DIR="$(cd "$(dirname "$BGDI_BIN")" && pwd)"
+DIST_DIR="$SCRIPT_DIR/dist/macos-arm64"
+APP_DIR="$DIST_DIR/$APP_NAME.app"
+CONTENTS_DIR="$APP_DIR/Contents"
+MACOS_DIR="$CONTENTS_DIR/MacOS"
+FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
+APP_GAME_DIR="$RESOURCES_DIR/game"
+LAUNCHER="$MACOS_DIR/$APP_NAME"
+DMG_PATH="$DIST_DIR/$APP_NAME-macos-arm64.dmg"
+FRAMEWORK_SRC="$SCRIPT_DIR/dependencies/macos-arm64/SDL2_gpu.framework"
+FRAMEWORK_BIN="$FRAMEWORKS_DIR/SDL2_gpu.framework/Versions/A/SDL2_gpu"
+
+if [[ ! -d "$FRAMEWORK_SRC" ]]; then
+    FRAMEWORK_SRC="$SCRIPT_DIR/vendor/sdl-gpu/build/macos-arm64/SDL_gpu/lib/SDL2_gpu.framework"
+fi
+if [[ ! -d "$FRAMEWORK_SRC" ]]; then
+    echo "Error: SDL2_gpu.framework not found. Run: cd vendor && ./build-sdl-gpu.sh macos-arm64 clean" >&2
+    exit 1
+fi
+
+mkdir -p "$DIST_DIR"
+rm -rf "$APP_DIR"
+rm -f "$DMG_PATH"
+
+mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$RESOURCES_DIR"
+
+cp "$BGDI_BIN" "$MACOS_DIR/bgdi"
+cp "$BUILD_BIN_DIR"/*.dylib "$MACOS_DIR/"
+cp -R "$FRAMEWORK_SRC" "$FRAMEWORKS_DIR/"
+cp -R "$GAME_DIR" "$APP_GAME_DIR"
+
+cat > "$LAUNCHER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+SELF_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+GAME_DIR="\$SELF_DIR/../Resources/game"
+export DYLD_LIBRARY_PATH="\$SELF_DIR:\${DYLD_LIBRARY_PATH:-}"
+cd "\$GAME_DIR"
+exec "\$SELF_DIR/bgdi" "$DCB_FILE" "\$@"
+EOF
+
+chmod +x "$LAUNCHER"
+
+cat > "$CONTENTS_DIR/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>$APP_NAME</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.bennugd2.$APP_NAME</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$APP_NAME</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+</dict>
+</plist>
+EOF
+
+copy_external_deps_recursive "$APP_DIR" "$MACOS_DIR" "$FRAMEWORK_BIN"
+rewrite_install_names "$MACOS_DIR" "$FRAMEWORK_BIN"
+
+echo "APP: $APP_DIR"
+
+if [[ "$GENERATE_DMG" -eq 1 ]]; then
+    hdiutil create -volname "$APP_NAME" -srcfolder "$APP_DIR" -ov -format UDZO "$DMG_PATH" >/dev/null
+    echo "DMG: $DMG_PATH"
+fi
+
+echo "Done."

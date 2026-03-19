@@ -28,3 +28,7 @@ android_projects/*/build/
 android_projects/*/.gradle/
 android_projects/*/app/build/
 android_projects/*/app/.cxx/
+
+# Local game workspaces
+games/
+dist/
