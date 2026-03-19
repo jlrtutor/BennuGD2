@@ -2,7 +2,7 @@
 
 show_help() {
     echo "usage:"
-    echo "    $0 [windows|windows32|linux|linux32|switch|macosx] [debug] [clean] [packages] [use_sdl2|use_sdl2_gpu] [verbose] [static] [one-job]"
+    echo "    $0 [windows|windows32|linux|linux32|switch|macosx|macos-arm64] [debug] [clean] [packages] [use_sdl2|use_sdl2_gpu] [verbose] [static] [one-job]"
     exit 1
 }
 
@@ -249,6 +249,34 @@ build_target() {
                 STDLIBSFLAGS="-L${SDKROOT}/../../macports/pkgs/opt/local/lib"
                 ;;
 
+            macos-arm64|macos|darwin)
+                TARGET=macos-arm64
+                SDL2GPUDIR="../../vendor/sdl-gpu/build/$ENV{TARGET}"
+                SDL2GPULIBDIR="../../vendor/sdl-gpu/build/$ENV{TARGET}"
+
+                HOMEBREW_PREFIX="$(brew --prefix 2>/dev/null)"
+                if [ -z "$HOMEBREW_PREFIX" ]; then
+                    if [ -d "/opt/homebrew" ]; then
+                        HOMEBREW_PREFIX="/opt/homebrew"
+                    else
+                        HOMEBREW_PREFIX="/usr/local"
+                    fi
+                fi
+
+                CMAKE_EXTRA="-DCMAKE_OSX_ARCHITECTURES=arm64 \
+                    -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+                    -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib \
+                    -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib \
+                    -DSDL2_IMAGE_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDL2_IMAGE_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_image.dylib \
+                    -DSDL2_Mixer_INCLUDE_DIRS=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDLMIXER_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_mixer.dylib"
+                CMAKE_EXTRA+=" -DCMAKE_C_FLAGS=-Wno-pointer-sign"
+                EXTRA_CFLAGS+="-I${HOMEBREW_PREFIX}/include"
+                STDLIBSFLAGS="-L${HOMEBREW_PREFIX}/lib"
+                ;;
+
             android)
                 filtered_args=()
                 for arg in "$@"; do
@@ -375,6 +403,9 @@ build_target() {
                     build_app bgdi
                     build_app moddesc
                 fi
+                if [[ -d build/macos-arm64/bin ]]; then
+                    tar -zcvf packages/bgd2-macos-arm64-$(date +"%Y-%m-%d").tgz build/macos-arm64/bin/* dependencies/macos-arm64/* WhatsNew.txt --transform='s,[^/]*/,,g';
+                fi
                 exit 0
                 ;;
 
@@ -404,6 +435,34 @@ build_target() {
 
             linux)
                 TARGET=linux-gnu
+                ;;
+
+            darwin)
+                TARGET=macos-arm64
+                SDL2GPUDIR="../../vendor/sdl-gpu/build/$ENV{TARGET}"
+                SDL2GPULIBDIR="../../vendor/sdl-gpu/build/$ENV{TARGET}"
+
+                HOMEBREW_PREFIX="$(brew --prefix 2>/dev/null)"
+                if [ -z "$HOMEBREW_PREFIX" ]; then
+                    if [ -d "/opt/homebrew" ]; then
+                        HOMEBREW_PREFIX="/opt/homebrew"
+                    else
+                        HOMEBREW_PREFIX="/usr/local"
+                    fi
+                fi
+
+                CMAKE_EXTRA="-DCMAKE_OSX_ARCHITECTURES=arm64 \
+                    -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+                    -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib \
+                    -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib \
+                    -DSDL2_IMAGE_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDL2_IMAGE_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_image.dylib \
+                    -DSDL2_Mixer_INCLUDE_DIRS=${HOMEBREW_PREFIX}/include/SDL2 \
+                    -DSDLMIXER_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2_mixer.dylib"
+                CMAKE_EXTRA+=" -DCMAKE_C_FLAGS=-Wno-pointer-sign"
+                EXTRA_CFLAGS+="-I${HOMEBREW_PREFIX}/include"
+                STDLIBSFLAGS="-L${HOMEBREW_PREFIX}/lib"
                 ;;
         esac
 

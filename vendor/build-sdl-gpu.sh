@@ -2,7 +2,7 @@
 
 show_help() {
     echo "usage:"
-    echo "    $0 [windows|windows32|linux|linux32|switch] [debug] [clean] [verbose] [one-job]"
+    echo "    $0 [windows|windows32|linux|linux32|switch|macosx|macos-arm64] [debug] [clean] [verbose] [one-job]"
     exit 1
 }
 
@@ -54,6 +54,21 @@ build_target() {
             macosx)
                 TARGET=x86_64-apple-darwin14
                 CMAKE_EXTRA="-DCMAKE_C_FLAGS=-Wno-incompatible-function-pointer-types -DCMAKE_OSX_DEPLOYMENT_TARGET=10.10 -DSDL2_INCLUDE_DIR=${SDKROOT}/../../macports/pkgs/opt/local/include/SDL2 -DSDL2_LIBRARY=${SDKROOT}/../../macports/pkgs/opt/local/lib/libSDL2.dylib -DSDL2_LIBRARIES=${SDKROOT}/../../macports/pkgs/opt/local/lib/libSDL2.dylib -DCMAKE_C_COMPILER=${SDKROOT}/../../bin/o64-clang -DCMAKE_CXX_COMPILER=${SDKROOT}/../../bin/o64-clang++  -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_SYSROOT=${SDKROOT}/../../SDK/MacOSX10.10.sdk"
+                ;;
+
+            macos-arm64|macos|darwin)
+                TARGET=macos-arm64
+
+                HOMEBREW_PREFIX="$(brew --prefix 2>/dev/null)"
+                if [ -z "$HOMEBREW_PREFIX" ]; then
+                    if [ -d "/opt/homebrew" ]; then
+                        HOMEBREW_PREFIX="/opt/homebrew"
+                    else
+                        HOMEBREW_PREFIX="/usr/local"
+                    fi
+                fi
+
+                CMAKE_EXTRA="-DCMAKE_C_FLAGS=-Wno-incompatible-function-pointer-types -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DSDL2_INCLUDE_DIR=${HOMEBREW_PREFIX}/include/SDL2 -DSDL2_LIBRARY=${HOMEBREW_PREFIX}/lib/libSDL2.dylib -DSDL2_LIBRARIES=${HOMEBREW_PREFIX}/lib/libSDL2.dylib"
                 ;;
 
             android)
@@ -166,7 +181,7 @@ build_target() {
 
     #cmake ../.. $DEBUG -DCMAKE_BUILD_TYPE=$BUILD_TYPE $CMAKE_EXTRA $VERBOSE -DSDL_gpu_BUILD_TESTS=YES -DSDL_gpu_BUILD_VIDEO_TEST=YES -DSDL_gpu_BUILD_TOOLS=YES
     #cmake ../.. $DEBUG -DCMAKE_BUILD_TYPE=$BUILD_TYPE $CMAKE_EXTRA $VERBOSE -DSDL_gpu_BUILD_TESTS=YES -DBUILD_TESTS=YES -DBUILD_VIDEO_TEST=YES -DBUILD_TOOLS=YES
-    cmake ../.. $DEBUG -DINCLUDE_DIRECTORIES="${INCLUDE_DIRECTORIES}" -DCMAKE_BUILD_TYPE=$BUILD_TYPE $CMAKE_EXTRA $VERBOSE -DSDL_gpu_BUILD_TESTS=NO -DBUILD_TESTS=NO -DBUILD_VIDEO_TEST=NO -DBUILD_TOOLS=NO -DBUILD_DEMOS=NO -DBUILD_STATIC=YES
+    cmake ../.. $DEBUG -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DINCLUDE_DIRECTORIES="${INCLUDE_DIRECTORIES}" -DCMAKE_BUILD_TYPE=$BUILD_TYPE $CMAKE_EXTRA $VERBOSE -DSDL_gpu_BUILD_TESTS=NO -DBUILD_TESTS=NO -DBUILD_VIDEO_TEST=NO -DBUILD_TOOLS=NO -DBUILD_DEMOS=NO -DBUILD_STATIC=YES
     if grep -q "CMAKE_GENERATOR:INTERNAL=Ninja" CMakeCache.txt; then
         ninja
     elif grep -q "CMAKE_GENERATOR:INTERNAL=Unix Makefiles" CMakeCache.txt; then
@@ -200,6 +215,11 @@ build_target() {
                 cp -Rf SDL_gpu/lib/* ../../../../dependencies/$TARGET
                 ;;
 
+            macos-arm64)
+                mkdir -p ../../../../dependencies/$TARGET
+                cp -Rf SDL_gpu/lib/* ../../../../dependencies/$TARGET
+                ;;
+
         esac
 
     fi
@@ -211,4 +231,3 @@ build_target "$@"
 echo "### Build done! ###"
 
 exit 0
-
