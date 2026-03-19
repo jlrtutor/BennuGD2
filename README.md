@@ -28,25 +28,52 @@ This generates `bgdc`, `bgdi`, and runtime modules in:
 
 ## Compile a Game
 
-Use the helper script:
+From the repository root:
 
 ```bash
 ./compile games/Goody/Goody.prg
 ```
 
-Output:
+This generates:
 
 `games/Goody/Goody.dcb`
 
-## Run a Game
+## Execute a Game
+
+Compile and run in one step:
 
 ```bash
 ./run games/Goody/Goody.prg
 ```
 
-Or run an existing DCB directly:
+Run an existing `DCB`:
 
 ```bash
+./run games/Goody/Goody.dcb
+```
+
+## Manual CLI (without helper scripts)
+
+If you prefer raw CLI commands:
+
+```bash
+cd games/Goody
+../../build/macos-arm64/bin/bgdc Goody.prg
+../../build/macos-arm64/bin/bgdi Goody.dcb
+```
+
+Or from repository root:
+
+```bash
+build/macos-arm64/bin/bgdc games/Goody/Goody.prg
+cd games/Goody
+../../build/macos-arm64/bin/bgdi Goody.dcb
+```
+
+## Typical Workflow
+
+```bash
+./compile games/Goody/Goody.prg
 ./run games/Goody/Goody.dcb
 ```
 
