@@ -34,9 +34,7 @@ find_bgdi() {
     fi
     for candidate in \
         "$SCRIPT_DIR/build/macos-arm64/bin/bgdi" \
-        "$SCRIPT_DIR/build/linux-gnu/bin/bgdi" \
-        "$SCRIPT_DIR/build/x86_64-w64-mingw32/bin/bgdi.exe" \
-        "$SCRIPT_DIR/build/i686-w64-mingw32/bin/bgdi.exe"
+        "$SCRIPT_DIR/build/linux-gnu/bin/bgdi"
     do
         if [[ -x "$candidate" ]]; then
             echo "$candidate"
