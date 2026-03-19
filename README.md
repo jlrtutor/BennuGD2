@@ -2,7 +2,30 @@
 
 This fork is focused on building and running BennuGD2 on macOS Apple Silicon (M1/M2/M3).
 
-## Requirements
+## IMPORTANT: PREBUILT BINARIES ARE ALREADY INCLUDED
+
+You do not need to build the engine to run games.
+
+Just:
+
+1. Clone this repository.
+2. Open a terminal in the repository root.
+3. Run a game directly, for example:
+
+```bash
+./run games/Goody/Goody.prg
+```
+
+Prebuilt binaries are already in:
+
+- `binaries/macos-arm64/bin`
+- `binaries/macos-arm64/Frameworks/SDL2_gpu.framework`
+
+## Build Engine (Optional)
+
+Only needed if you want to rebuild BennuGD2 locally.
+
+### Requirements
 
 Install dependencies with Homebrew:
 
@@ -10,7 +33,7 @@ Install dependencies with Homebrew:
 brew install cmake sdl2 sdl2_image sdl2_mixer glew libogg libvorbis theora pkg-config
 ```
 
-## Build Engine (macOS arm64)
+### Build (macOS arm64)
 
 ```bash
 git submodule update --init --recursive
@@ -25,13 +48,6 @@ cd ..
 This generates `bgdc`, `bgdi`, and runtime modules in:
 
 `build/macos-arm64/bin`
-
-## Prebuilt Apple Silicon Binaries in Repository
-
-This repository also includes prebuilt macOS arm64 binaries in:
-
-- `binaries/macos-arm64/bin`
-- `binaries/macos-arm64/Frameworks/SDL2_gpu.framework`
 
 ## Compile a Game
 
